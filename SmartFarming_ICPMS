@@ -1,0 +1,149 @@
+
+#include "WiFi.h"
+#include "HTTPClient.h"
+#include "DHT.h"
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h> 
+#include <WiFiManager.h>
+
+#define DHTPIN 4
+#define DHTTYPE DHT22
+#define SOIL1_PIN 34
+#define SOIL2_PIN 35
+#define MQ135_PIN 32
+#define WL1_PIN 12
+#define WL2_PIN 14
+#define RELAY1_PIN 26
+#define RELAY2_PIN 27
+
+DHT dht(DHTPIN, DHTTYPE);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+const char* host = "19.0.2.227";
+const char* thingSpeakAPIKey = "AYQ9SIZ6BKQV310B";
+
+void setup() {
+  Serial.begin(9600);
+  lcd.init();
+  lcd.backlight();
+  dht.begin();
+
+  pinMode(RELAY1_PIN, OUTPUT);
+  pinMode(RELAY2_PIN, OUTPUT);
+  pinMode(WL1_PIN, INPUT);
+  pinMode(WL2_PIN, INPUT);
+  digitalWrite(RELAY1_PIN, HIGH);
+  digitalWrite(RELAY2_PIN, HIGH);
+
+  WiFiManager wifiManager;
+  wifiManager.autoConnect("ICPMS-Config");
+  Serial.println("WiFi Tersambung");
+  lcd.setCursor(0, 0);
+  lcd.print("WiFi Connected");
+  delay(2000);
+  lcd.clear();
+
+  lcd.setCursor(0, 0);
+  lcd.print("R.ICP-MS");
+  delay(2000);
+  lcd.clear();
+
+  if (!wifiManager.autoConnect("ESP32-Config")) {
+    Serial.println("Gagal terhubung ke WiFi");
+    lcd.clear();
+    lcd.print("WiFi Failed");
+    delay(3000);
+    ESP.restart();
+  } else {
+    Serial.println("WiFi OK");
+    lcd.print("Berhasil.....- ");
+    delay(5000);
+    lcd.clear();
+  }
+}
+
+void loop() {
+  delay(2000);
+  float suhu = dht.readTemperature();
+  float kelembaban = dht.readHumidity();
+  int soil1 = analogRead(SOIL1_PIN);
+  int soil2 = analogRead(SOIL2_PIN);
+  int mq135 = analogRead(MQ135_PIN);
+  int wl1 = digitalRead(WL1_PIN);
+  int wl2 = digitalRead(WL2_PIN);
+
+  if (isnan(suhu) || isnan(kelembaban)) {
+    lcd.setCursor(0, 0);
+    lcd.print("DHT Error");
+    return;
+  }
+
+  int pompa1Aktif = (soil1 > 3000) ? LOW : HIGH;
+  int pompa2Aktif = (soil2 > 3000) ? LOW : HIGH;
+  digitalWrite(RELAY1_PIN, pompa1Aktif);
+  digitalWrite(RELAY2_PIN, pompa2Aktif);
+  int statusPompa1 = (pompa1Aktif == LOW) ? 1 : 0;
+  int statusPompa2 = (pompa2Aktif == LOW) ? 1 : 0;
+
+  lcd.setCursor(0, 0);
+  lcd.print("Suhu:");
+  lcd.print(suhu, 1);
+  lcd.print((char)223);
+  lcd.print("C ");
+
+  lcd.setCursor(0, 1);
+  lcd.print("Lembab:");
+  lcd.print(kelembaban, 1);
+  lcd.print("%");
+
+  Serial.println("Suhu: " + String(suhu));
+  Serial.println("Lembab: " + String(kelembaban));
+  Serial.println("Soil1: " + String(soil1));
+  Serial.println("Soil2: " + String(soil2));
+  Serial.println("MQ135: " + String(mq135));
+  Serial.println("Pompa1: " + String(statusPompa1));
+  Serial.println("Pompa2: " + String(statusPompa2));
+  Serial.println("WL1: " + String(wl1));
+  Serial.println("WL2: " + String(wl2));
+
+  String urlLokal = "http://" + String(host) + "/sidonew/suhuicpms/inputicpms.php";
+  urlLokal += "?soil1=" + String(soil1);
+  urlLokal += "&soil2=" + String(soil2);
+  urlLokal += "&pompa1=" + String(statusPompa1);
+  urlLokal += "&pompa2=" + String(statusPompa2);
+  urlLokal += "&wl1=" + String(wl1);
+  urlLokal += "&wl2=" + String(wl2);
+  urlLokal += "&suhu=" + String(suhu);
+  urlLokal += "&mq135=" + String(mq135);
+
+  HTTPClient http;
+  http.begin(urlLokal);
+  int code1 = http.GET();
+  if (code1 > 0) {
+    Serial.println("Kirim ke server lokal OK");
+  } else {
+    Serial.println("Gagal kirim ke server lokal");
+  }
+  http.end();
+
+  String tsURL = "http://api.thingspeak.com/update?api_key=" + String(thingSpeakAPIKey);
+  tsURL += "&field1=" + String(soil1);
+  tsURL += "&field2=" + String(soil2);
+  tsURL += "&field3=" + String(statusPompa1);
+  tsURL += "&field4=" + String(statusPompa2);
+  tsURL += "&field5=" + String(wl1);
+  tsURL += "&field6=" + String(wl2);
+  tsURL += "&field7=" + String(suhu);
+  tsURL += "&field8=" + String(mq135);
+
+  http.begin(tsURL);
+  int code2 = http.GET();
+  if (code2 > 0) {
+    Serial.println("Kirim ke ThingSpeak OK");
+  } else {
+    Serial.println("Gagal kirim ke ThingSpeak");
+  }
+  http.end();
+
+  delay(120000);
+}
