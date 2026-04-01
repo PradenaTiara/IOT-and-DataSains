@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Smart Agriculture Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <script src="https://cdn.jsdelivr.net/npm/raphael@2.3.0/raphael.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/justgage@1.3.5/justgage.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f0f2f5;
+    }
+    header {
+      text-align: center;
+      padding: 25px;
+      background: linear-gradient(90deg, #00b4d8, #0077b6);
+      color: white;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      margin: 0;
+      font-size: 2rem;
+    }
+    section.grid {
+      display: grid;
+      gap: 20px;
+      padding: 30px 20px;
+      max-width: 1200px;
+      margin: auto;
+    }
+    .gauge-grid {
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }
+    .lamp-grid {
+      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+      justify-items: center;
+    }
+    .number-grid {
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      justify-items: center;
+    }
+    .map-container {
+      height: 350px;
+    }
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      transition: transform 0.2s;
+    }
+    .card:hover {
+      transform: translateY(-4px);
+    }
+    .lamp-circle {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      margin: auto;
+      margin-bottom: 5px;
+      background: grey;
+      transition: background 0.3s;
+    }
+    .lamp-label {
+      text-align: center;
+      font-weight: 600;
+    }
+    .number {
+      background: white;
+      padding: 20px;
+      border-radius: 16px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+    .number h4 {
+      font-size: 1.1rem;
+      color: #333;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+    .number-inner {
+      background: #343a40;
+      padding: 20px;
+      border-radius: 12px;
+      text-align: center;
+    }
+    .number-value {
+      font-size: 2.4rem;
+      font-weight: bold;
+      color: #ffffff;
+    }
+    canvas {
+      width: 100% !important;
+      height: 240px !important;
+    }
+    #map {
+      width: 100%;
+      height: 300px;
+      border-radius: 12px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🌿 Smart Farming Monitoring</h1>
+</header>
+
+<section class="grid">
+  <div class="card map-container">
+    <h3>📍 Lokasi Channel</h3>
+    <div id="map"></div>
+  </div>
+</section>
+
+<section class="grid gauge-grid">
+  <div class="card">
+    <h3>🌱 Soil Moisture 1</h3>
+    <div id="gauge1"></div>
+  </div>
+  <div class="card">
+    <h3>🌱 Soil Moisture 2</h3>
+    <div id="gauge2"></div>
+  </div>
+</section>
+
+<section class="grid gauge-grid">
+  <div class="card">
+    <h3>📈 Moisture 1 Trend</h3>
+    <canvas id="chart1"></canvas>
+  </div>
+  <div class="card">
+    <h3>📈 Moisture 2 Trend</h3>
+    <canvas id="chart2"></canvas>
+  </div>
+</section>
+
+<section class="grid lamp-grid">
+  <div class="card">
+    <div class="lamp-circle" id="lamp3"></div>
+    <div class="lamp-label">Pompa 1</div>
+  </div>
+  <div class="card">
+    <div class="lamp-circle" id="lamp4"></div>
+    <div class="lamp-label">Pompa 2</div>
+  </div>
+  <div class="card">
+    <div class="lamp-circle" id="lamp5"></div>
+    <div class="lamp-label">Level Air 1</div>
+  </div>
+  <div class="card">
+    <div class="lamp-circle" id="lamp6"></div>
+    <div class="lamp-label">Level Air 2</div>
+  </div>
+</section>
+
+<section class="grid number-grid">
+  <div class="card">
+    <h4>🌡️ Suhu</h4>
+    <div class="number-inner">
+      <div class="number-value" id="number7">--</div>
+    </div>
+  </div>
+  <div class="card">
+    <h4>🌫️ Kualitas Udara (MQ135)</h4>
+    <div class="number-inner">
+      <div class="number-value" id="number8">--</div>
+    </div>
+  </div>
+</section>
+
+<script>
+  const channelId = "2993969";
+
+  async function initMap() {
+    try {
+      const res = await fetch(`https://api.thingspeak.com/channels/${channelId}.json`);
+      const data = await res.json();
+      const lat = parseFloat(data.latitude);
+      const lng = parseFloat(data.longitude);
+      const name = data.name || "Channel";
+
+      if (!isNaN(lat) && !isNaN(lng)) {
+        const map = L.map('map').setView([lat, lng], 14);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+        L.marker([lat, lng]).addTo(map).bindPopup(`<b>${name}</b><br>Lat: ${lat}<br>Lng: ${lng}`).openPopup();
+      } else {
+        document.getElementById("map").innerHTML = "<p>📍 Lokasi belum diset.</p>";
+      }
+    } catch (err) {
+      document.getElementById("map").innerHTML = "<p>Gagal memuat peta.</p>";
+    }
+  }
+
+  const gauge1 = new JustGage({ id: "gauge1", value: 0, min: 1000, max: 4000, levelColors: ["#90be6d", "#f9c74f", "#f94144"] });
+  const gauge2 = new JustGage({ id: "gauge2", value: 0, min: 1000, max: 4000, levelColors: ["#90be6d", "#f9c74f", "#f94144"] });
+
+  const chart1 = new Chart(document.getElementById("chart1").getContext("2d"), {
+    type: "line", data: { labels: [], datasets: [{ label: "Soil 1", data: [], borderColor: "#0077b6", fill: false }] },
+    options: { scales: { y: { min: 1000, max: 4000 } }, plugins: { legend: { display: false } } }
+  });
+
+  const chart2 = new Chart(document.getElementById("chart2").getContext("2d"), {
+    type: "line", data: { labels: [], datasets: [{ label: "Soil 2", data: [], borderColor: "#00b4d8", fill: false }] },
+    options: { scales: { y: { min: 1000, max: 4000 } }, plugins: { legend: { display: false } } }
+  });
+
+  async function fetchData() {
+    try {
+      const res = await fetch(`https://api.thingspeak.com/channels/${channelId}/feeds.json?results=20`);
+      const data = await res.json();
+      const feeds = data.feeds;
+      if (!feeds.length) return;
+
+      const labels = feeds.map(f => new Date(f.created_at).toLocaleTimeString());
+      const field = n => feeds.map(f => parseFloat(f[`field${n}`]));
+      const last = feeds[feeds.length - 1];
+
+      gauge1.refresh(parseFloat(last.field1));
+      gauge2.refresh(parseFloat(last.field2));
+
+      chart1.data.labels = labels;
+      chart1.data.datasets[0].data = field(1);
+      chart1.update();
+
+      chart2.data.labels = labels;
+      chart2.data.datasets[0].data = field(2);
+      chart2.update();
+
+      for (let i = 3; i <= 6; i++) {
+        const el = document.getElementById(`lamp${i}`);
+        const val = parseInt(last[`field${i}`]);
+        el.style.background = val === 1 ? "#06d6a0" : "#bbb";
+      }
+
+      document.getElementById("number7").innerText = last.field7 + " °C";
+      document.getElementById("number8").innerText = last.field8;
+    } catch (err) {
+      console.error("Gagal memuat data", err);
+    }
+  }
+
+  initMap();
+  fetchData();
+  setInterval(fetchData, 15000);
+</script>
+
+</body>
+</html>
